@@ -1,0 +1,204 @@
+---
+title: "Simplifying shapes with R and {sf}"
+author: "Markus Konrad"
+date: "3/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r, warning=FALSE}
+library(ggplot2)
+library(sf)
+library(magrittr)
+```
+
+```{r}
+TARGET_CRS <- '+proj=aeqd +lat_0=53.6 +lon_0=12.7'   # centered at input data for low distortion
+mv <- st_geometry(st_read('data/mv.geojson')) %>%
+  st_transform(crs = TARGET_CRS)
+```
+
+
+```{r}
+plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('black', 'red'),
+                     alpha = 1, graticules = FALSE, zoom_to = NULL, zoom_level = NULL) {
+  if (!is.null(zoom_level)) {
+    if (is.null(zoom_to)) {
+      zoom_to_xy <- st_sfc(st_point(c(0, 0)), crs = TARGET_CRS)
+    } else {
+      zoom_to_xy <- st_transform(st_sfc(st_point(zoom_to), crs = 4326), crs = TARGET_CRS)
+    }
+    
+    C <- 40075016.686   # ~ circumference of Earth in meters
+    x_span <- C / 2^zoom_level
+    y_span <- C / 2^(zoom_level+1)
+    
+    disp_window <- st_sfc(
+        st_point(st_coordinates(zoom_to_xy - c(x_span / 2, y_span / 2))),
+        st_point(st_coordinates(zoom_to_xy + c(x_span / 2, y_span / 2))),
+        crs = TARGET_CRS
+    )
+    
+    xlim <- st_coordinates(disp_window)[,'X']
+    ylim <- st_coordinates(disp_window)[,'Y']
+  } else {
+    xlim <- NULL
+    ylim <- NULL
+  }
+  
+  if (!is.null(diff_to)) {
+    shapebase <- diff_to
+    shapediff <- st_sym_difference(data, diff_to)
+  } else {
+    shapebase <- data
+    shapediff <- NULL
+  }
+  
+  p <- ggplot() +
+    geom_sf(data = shapebase, color = strokecolor, fill = fillcolor[1], alpha = alpha)
+  
+  if (!is.null(shapediff)) {
+    p <- p + geom_sf(data = shapediff, color = strokecolor, fill = fillcolor[2], alpha = alpha)
+  }
+  
+  p +
+    coord_sf(xlim = xlim,
+             ylim = ylim,
+             crs = TARGET_CRS,
+             datum = ifelse(graticules, TARGET_CRS, NA)) +
+    theme_bw()
+}
+```
+
+
+Important: Use CRS that uses meters / equidistant CRS.
+
+```{r}
+plot_map(mv, graticules = TRUE)
+```
+
+```{r}
+plot_map(mv, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+### `st_simplify`
+
+```{r}
+mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 1000)
+plot_map(mv_simpl)
+```
+
+```{r}
+plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+```{r}
+plot_map(mv, mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+```{r}
+mv_simpl <- st_simplify(mv, preserveTopology = TRUE, dTolerance = 1000)
+plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+```{r}
+plot_map(mv, mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+```{r}
+mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 10000)
+plot_map(mv_simpl)
+```
+
+```{r}
+plot_map(mv, mv_simpl)
+```
+
+### `st_buffer()`
+
+
+```{r}
+mv_buf <- st_buffer(mv, 1000, nQuadSegs = 2)
+plot_map(mv_buf)
+```
+
+```{r}
+plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+```{r}
+mv_buf <- st_buffer(mv, -1000, nQuadSegs = 2)
+plot_map(mv_buf)
+```
+```{r}
+plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+```{r}
+mv_buf <- st_buffer(mv, -1000, nQuadSegs = 1) %>%
+  st_buffer(1000, nQuadSegs = 1)
+plot_map(mv_buf)
+```
+
+```{r}
+plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+### `st_union()`
+
+joins overlapping or touching shapes
+
+```{r}
+TARGET_CRS <- '+proj=aeqd +lat_0=52.51883 +lon_0=13.41537'   # centered at input data for low distortion
+
+noise <- read_sf('data/noise_berlin_sample.geojson') %>%
+  st_transform(crs = TARGET_CRS)
+
+plot_map(noise)
+```
+
+```{r}
+nrow(noise)
+```
+
+
+```{r}
+plot_map(noise, strokecolor = 'black', fillcolor = 'gray', zoom_level = 15)
+```
+
+we also lose information with this operation
+
+```{r}
+noise_union <- st_union(noise)
+noise_union
+```
+
+```{r}
+plot_map(noise_union, strokecolor = 'black', fillcolor = 'gray', zoom_level = 15)
+```
+
+
+```{r}
+plot_map(noise_union, strokecolor = 'black', fillcolor = 'gray')
+```
+
+
+```{r}
+noise_union_simpl <- st_simplify(noise_union, preserveTopology = FALSE, dTolerance = 10)
+
+plot_map(noise_union_simpl, strokecolor = 'black', fillcolor = 'gray')
+```
+
+
+applying simplify without union before would not have the desired effect
+
+
+```{r}
+st_simplify(noise, preserveTopology = FALSE, dTolerance = 10) %>%
+  plot_map(strokecolor = 'black', fillcolor = 'gray')
+```
+
