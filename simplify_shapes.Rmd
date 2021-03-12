@@ -1,5 +1,5 @@
 ---
-title: "Simplifying shapes with R and {sf}"
+title: "Simplifying geospatial features in R with sf and rmapshaper"
 author: "Markus Konrad"
 date: "3/10/2021"
 output: html_document
@@ -9,29 +9,30 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+When working with geospatial data, memory consumption and computation time can become quite a problem for large datasets. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first to *simplify* the geospatial features (simply put, the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove whole features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss (well, this is the whole sense of simplification), you should be very careful about how much you simplify and if this in some way biases you results.
 
+In R, we can apply this sort of simplification with a few functions from packages [sf](https://cran.r-project.org/web/packages/sf/index.html) and, for some special cases explained below, [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html). In the following, I will show how to apply them and what the effects of their parameters are.
 
-```{r, warning=FALSE}
+First, let's load the required libraries. Besides the already mentioned sf package, we also load [ggplot2](https://ggplot2.tidyverse.org/) for visualization and [magrittr](https://magrittr.tidyverse.org/), because I will use the `%>%` pipe operator sometimes.
+
+```{r, message=FALSE}
 library(ggplot2)
-library(sf)
 library(magrittr)
+library(sf)
 ```
 
-```{r}
-TARGET_CRS <- '+proj=aeqd +lat_0=53.6 +lon_0=12.7'   # centered at input data for low distortion
-mv <- st_geometry(st_read('data/mv.geojson')) %>%
-  st_transform(crs = TARGET_CRS)
-```
+I will also use a utility function `plot_map()` which is capable of plotting geospatial features, zooming into certain spots and highlighting differences between two features. The lengthy source code for this function is available in the Rmarkdown document (TODO: link to Rmd doc.)
 
-
-```{r}
-plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('black', 'red'),
+```{r, echo=FALSE}
+plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('#097FB3', '#A13675'),
                      alpha = 1, graticules = FALSE, zoom_to = NULL, zoom_level = NULL) {
+  target_crs <- st_crs(data)
+  
   if (!is.null(zoom_level)) {
     if (is.null(zoom_to)) {
-      zoom_to_xy <- st_sfc(st_point(c(0, 0)), crs = TARGET_CRS)
+      zoom_to_xy <- st_sfc(st_point(c(0, 0)), crs = target_crs)
     } else {
-      zoom_to_xy <- st_transform(st_sfc(st_point(zoom_to), crs = 4326), crs = TARGET_CRS)
+      zoom_to_xy <- st_transform(st_sfc(st_point(zoom_to), crs = 4326), crs = target_crs)
     }
     
     C <- 40075016.686   # ~ circumference of Earth in meters
@@ -41,7 +42,7 @@ plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('blac
     disp_window <- st_sfc(
         st_point(st_coordinates(zoom_to_xy - c(x_span / 2, y_span / 2))),
         st_point(st_coordinates(zoom_to_xy + c(x_span / 2, y_span / 2))),
-        crs = TARGET_CRS
+        crs = target_crs
     )
     
     xlim <- st_coordinates(disp_window)[,'X']
@@ -69,45 +70,71 @@ plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('blac
   p +
     coord_sf(xlim = xlim,
              ylim = ylim,
-             crs = TARGET_CRS,
-             datum = ifelse(graticules, TARGET_CRS, NA)) +
+             crs = target_crs,
+             datum = ifelse(graticules, target_crs$input, NA)) +
     theme_bw()
 }
 ```
 
+## Loading and transforming our sample data
 
-Important: Use CRS that uses meters / equidistant CRS.
+Let's load our first example dataset. It represents the German federal state [Mecklenburg-Vorpommern (or Mecklenburg-West Pomerania)](https://www.openstreetmap.org/relation/28322) that features a  ragged coastline at the Baltic Sea, which is nice to show the effects of feature simplification. I will abbreviate Mecklenburg-Vorpommern by MV to spare us the complicated name.
+
+```{r}
+mv <- st_read('data/mv.geojson') %>%
+  st_geometry() %>%
+  st_transform(crs = '+proj=aeqd +lat_0=53.6 +lon_0=12.7')  # centered at input data for low distortion
+```
+
+The dataset contains only a single feature (a multi-polygon, i.e. a set of polygons) with some metadata from OpenStreetMap. I use `st_geometry()` to access this feature (i.e. dismiss the metadata) and `st_transform()` to transform it to an [Azimuthal Equidistant](http://www.radicalcartography.net/?projectionref) map projection. The latter is quite important. Most functions that we'll use don't work with spherical coordinates as used for example by the [WGS84 (GPS) standard](http://epsg.io/4326), where longitude and latitude in degrees describe a position on a sphere. We need to project these coordinates on a plane using a coordinate reference system (CRS). All projections distort in some way, but we can chose a CRS that accurately represents certain measures. For example, I chose an equidistant CRS because it accurately represents distances up to 10,000 km from the center of projection. Another important aspect is that by using such a CRS, we move from degrees to meters as units for our coordinates.
+
+Let's plot our projection of MV. Note the axes which represent the distance from the projection center (I chose the geographic center of MV for that) in meters.
 
 ```{r}
 plot_map(mv, graticules = TRUE)
 ```
 
+Let's zoom in on the island of Rügen with it's ragged coastline (west of it is the peninsula Darß).
+
 ```{r}
 plot_map(mv, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
-### `st_simplify`
+## Removing vertices with `st_simplify`
+
+We can now continue to apply different simplification methods to the displayed features. We will start with – no surprise – [`st_simplify`](https://rdrr.io/cran/sf/man/geos_unary.html). This function removes vertices in lines or polygons to form simpler shapes. The function implementation uses the [Douglas–Peucker algorithm](https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm) for simplification and accepts a parameter `dTolerance`, which roughly speaking specifies the distance in which any "wiggles" will be straightened. It's in the same unit as the input data, so in our case it's meters (the unit used in our CRS). There's also a parameter `preserveTopology` which, when set to TRUE, makes sure that polygons are not reduced to lines or even removed, or that inner holes in them are removed during the simplification process.
+
+Let's apply `st_simplify` with a tolerance of 1km:
 
 ```{r}
 mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 1000)
 plot_map(mv_simpl)
 ```
 
+We can see that the geometry is much simpler, especially when zooming in:
+
 ```{r}
 plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
+We can also confirm the memory usage is much lower for the simplified feature (shown in kilobytes):
+
+```{r}
+round(c(object.size(mv), object.size(mv_simpl)) / 1024)
+```
+The purple areas show the differences between the original and the simplified version. We can see for example, that some smaller islands were completely removed.
+
 ```{r}
 plot_map(mv, mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
+
+When we set `preserveTopology` to TRUE, we can observe that the small islands are retained:
 
 ```{r}
 mv_simpl <- st_simplify(mv, preserveTopology = TRUE, dTolerance = 1000)
 plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
-```{r}
-plot_map(mv, mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
-```
+Increasing the `dTolerance` parameter to 10km gives us something that is more akin to a Cubistic painting:
 
 ```{r}
 mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 10000)
@@ -118,25 +145,78 @@ plot_map(mv_simpl)
 plot_map(mv, mv_simpl)
 ```
 
-### `st_buffer()`
+## `st_simplify` limitations
+
+Using `st_simplify` comes with a limitation when working with multiple, adjacent features which I'd like to demonstrate using a map of the federal states in Germany.
+
+```{r}
+fedstates <- read_sf('data/germany_fedstates.geojson') %>%
+  st_transform(crs = 5243)  # ETRS89 / LCC Germany (E-N)
+fedstates[c('name', 'geometry')]
+```
+
+This time, our spatial dataset contains 16 features which represent the boundaries of each federal state:
+
+```{r}
+plot_map(fedstates, graticules = TRUE, strokecolor = '#097FB3', fillcolor = '#AED3E4')
+```
+
+Let's apply `st_simplify` with a tolerance of 10km and preserving feature topology:
+
+```{r}
+fedstates_simpl <- st_simplify(fedstates, preserveTopology = TRUE, dTolerance = 10000)
+plot_map(fedstates_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
+```
+Ups! We can see that `st_simplify` produced gaps and overlapping features, i.e. shared borders were not handled correctly! The problem is that `st_simplify` simply doesn't consider the topological concept of shared borders between features (like federal states in this case). When setting `preserveTopology = TRUE` it means that each feature's topology is preserve, but it doesn't mean that topology *between* features is considered.
+
+Luckily, there's the package [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html) that contains a function that does the trick. Before you install the package, please note that it requires a lot of (system-) dependencies to be installed.
+
+[Visvalingam's algorithm](https://en.wikipedia.org/wiki/Visvalingam%E2%80%93Whyatt_algorithm), which is used in this function, let's us specify the portion of vertices that should be kept after simplification. This can be specified with the `keep` parameter. The parameter `keep_shapes` controls whether whole features such as islands can be removed in the simplification process.
+
+```{r}
+library(rmapshaper)
+
+fedstates_simpl2 <- ms_simplify(fedstates, keep = 0.001, keep_shapes = FALSE)
+plot_map(fedstates_simpl2, strokecolor = '#097FB3', fillcolor = '#AED3E4')
+```
+As can be seen, `ms_simplify` respects the shared borders. The result is also much smaller in terms of memory usage:
+
+```{r}
+round(c(object.size(fedstates), object.size(fedstates_simpl2)) / 1024)
+```
+
+## Expanding and shrinking with `st_buffer()`
+
+[`st_buffer()`](https://rdrr.io/cran/sf/man/geos_unary.html) lets you expand (positive buffer distance) or shrink (negative buffer distance) polygon features. This may not per-se result in a simpler feature form, but it allows you to close holes (by expanding) or remove solitary, small features (by shrinking).
+
+Let's try a first example. Again, the buffer distance is in the same unit as our CRS, which is meters in our case, and we'll expand by 1km. When the buffer is generated, new vertices are added to form the expanded shape with round edges. The parameter `nQuadSegs` specifies how many segments are generated per quadrant and feature.
 
 
 ```{r}
-mv_buf <- st_buffer(mv, 1000, nQuadSegs = 2)
-plot_map(mv_buf)
+mv_buf <- st_buffer(mv, dist = 1000, nQuadSegs = 1)
+plot_map(mv_buf, graticules = TRUE)
 ```
 
+```{r}
+plot_map(mv, mv_buf, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
+```
+
+As we can see, the memory usage is not so much reduced:
+
+```{r}
+round(c(object.size(mv), object.size(mv_buf)) / 1024)
+```
+Now we shrink MV by 1km:
+
+```{r}
+mv_buf <- st_buffer(mv, -1000, nQuadSegs = 1)
+plot_map(mv_buf)
+```
 ```{r}
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
-```{r}
-mv_buf <- st_buffer(mv, -1000, nQuadSegs = 2)
-plot_map(mv_buf)
-```
-```{r}
-plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
-```
+We can also combine both buffering options, by first shrinking in order to remove small isolated features and then expanding again by the same distance so that the result has more or less the same extents as the original:
 
 ```{r}
 mv_buf <- st_buffer(mv, -1000, nQuadSegs = 1) %>%
@@ -147,16 +227,22 @@ plot_map(mv_buf)
 ```{r}
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
+Note how this is more aggressive than `st_simplify()` but the result uses more memory. We could now additionally apply `st_simplify()` to arrive at a very reduced feature.
 
-### `st_union()`
+```{r}
+round(c(object.size(mv), object.size(mv_buf)) / 1024)
+```
+
+When we apply `st_buffer()` to a dataset with multiple features like the federal states dataset, the buffering will be applied to every feature (i.e. every state's boundary) separately. This will result in either overlapping features (extending) or gaps between them (shrinking).
+
+
+## `st_union()`
 
 joins overlapping or touching shapes
 
 ```{r}
-TARGET_CRS <- '+proj=aeqd +lat_0=52.51883 +lon_0=13.41537'   # centered at input data for low distortion
-
 noise <- read_sf('data/noise_berlin_sample.geojson') %>%
-  st_transform(crs = TARGET_CRS)
+  st_transform(crs = '+proj=aeqd +lat_0=52.51883 +lon_0=13.41537')
 
 plot_map(noise)
 ```
