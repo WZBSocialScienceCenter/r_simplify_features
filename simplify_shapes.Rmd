@@ -14,7 +14,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-When working with geospatial data, memory consumption and computation time can become quite a problem, since these datasets are often very large. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first to *simplify* the *geospatial features* (simply put, the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove complete features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss (well, this is the whole sense of simplification), you should be very careful about how much you simplify and if this in some way biases you results.
+When working with geospatial data, memory consumption and computation time can become quite a problem, since these datasets are often very large. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first *simplify* the *geospatial features* (the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove complete features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss you should be very careful about how much you simplify and if this in some way biases you results.
 
 In R, we can apply this sort of simplification with a few functions from the packages [sf](https://cran.r-project.org/web/packages/sf/index.html) and, for some special cases explained below, [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html). In the following, I will show how to apply them and what the effects of their parameters are.
 
@@ -91,7 +91,7 @@ mv <- st_read('data/mv.geojson') %>%
   st_transform(crs = '+proj=aeqd +lat_0=53.6 +lon_0=12.7')  # centered at input data for low distortion
 ```
 
-The dataset contains only a single feature (a multi-polygon, i.e. a set of polygons) with some metadata from OpenStreetMap. I use `st_geometry()` to access this feature (i.e. dismiss the metadata) and `st_transform()` to transform it to an [Azimuthal Equidistant](http://www.radicalcartography.net/?projectionref) map projection. The latter is quite important. Most functions that I'll use don't work with spherical coordinates as used for example by the [WGS84 (GPS) standard](http://epsg.io/4326), where longitude and latitude in degrees describe a position on a sphere. We need to project these coordinates on a plane using a coordinate reference system (CRS) with a specific projection. All projections distort in some way, but we can chose a CRS that accurately represents certain measures. For example, I choose an equidistant CRS because it accurately represents distances up to 10,000 km from the center of projection. Another important aspect is that by using this CRS, we move from degrees to meters as units for our coordinates.
+The dataset contains only a single feature (a multi-polygon, i.e. a set of polygons) with some metadata from OpenStreetMap. I use `st_geometry()` to access this feature (i.e. dismiss the metadata) and `st_transform()` to transform it to an [Azimuthal Equidistant](http://www.radicalcartography.net/?projectionref) map projection. The latter is quite important. Most functions that I'll use don't work with spherical coordinates as used for example by the [WGS84 (GPS) standard](http://epsg.io/4326), where longitude and latitude in degrees describe a position on a sphere. We need to project these coordinates on a plane using a coordinate reference system (CRS) with a specific projection. All projections distort in some way, but we can choose a CRS that accurately represents certain measures. For example, I chose an equidistant CRS because it accurately represents distances up to 10,000 km from the center of projection. Another important aspect is that by using this CRS, we move from degrees to meters as units for our coordinates.
 
 Let's plot our projection of MV. Note the axes which represent the distance from the projection center (I chose the geographic center of MV for that) in meters.
 
@@ -194,9 +194,9 @@ As can be seen, `ms_simplify` respects the shared borders. The result is also mu
 round(c(object.size(fedstates), object.size(fedstates_simpl2)) / 1024)
 ```
 
-## Expanding and shrinking with `st_buffer()`
+## Expanding and shrinking with `st_buffer`
 
-[`st_buffer()`](https://rdrr.io/cran/sf/man/geos_unary.html) lets you expand (positive buffer distance) or shrink (negative buffer distance) polygon features. This may not per-se result in a simpler feature form, but it allows you to close holes (by expanding) or remove solitary, small features (by shrinking).
+[`st_buffer`](https://rdrr.io/cran/sf/man/geos_unary.html) lets you expand (positive buffer distance) or shrink (negative buffer distance) polygon features. This may not per-se result in a simpler feature form, but it allows you to close holes (by expanding) or remove solitary, small features (by shrinking).
 
 Let's try a first example. Again, the buffer distance is in the same unit as our CRS, which is meters in our case, and we'll expand by 1km. When the buffer is generated, new vertices are added to form the expanded shape with round edges. The parameter `nQuadSegs` specifies how many segments are generated per quadrant and feature.
 
@@ -237,18 +237,18 @@ plot_map(mv_buf)
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
-Note how this is more aggressive than `st_simplify()` but the result uses more memory. We could now additionally apply `st_simplify()` to arrive at a very reduced feature.
+Note how this is more aggressive than `st_simplify` but the result uses more memory. We could now additionally apply `st_simplify` to arrive at a very reduced feature.
 
 ```{r}
 round(c(object.size(mv), object.size(mv_buf)) / 1024)
 ```
 
-When we apply `st_buffer()` to a dataset with multiple features like the federal states dataset, the buffering will be applied to every feature (i.e. every state's boundary) separately. This will result in either overlapping features (extending) or gaps between them (shrinking).
+When we apply `st_buffer` to a dataset with multiple features like the federal states dataset, the buffering will be applied to every feature (i.e. every state's boundary) separately. This will result in either overlapping features (extending) or gaps between them (shrinking).
 
 
-## Joining overlapping and adjacent features with `st_union()`
+## Joining overlapping and adjacent features with `st_union`
 
-The last function that we will look at is `st_union()`. It can be used to join overlapping and adjacent features. With this, we could for example join all features of the federal state boundaries in Germany and get a single feature that represents the national boundaries. But let's look at a more interesting example and load a new dataset. It contains a sample with regions with street noise of 50dB or more in Berlin at night.
+The last function that we will look at is `st_union`. It can be used to join overlapping and adjacent features. With this, we could for example join all features of the federal state boundaries in Germany and get a single feature that represents the national boundaries. But let's look at a more interesting example and load a new dataset. It contains a sample with regions with street noise of 50dB or more in Berlin at night.
 
 ```{r 18noise}
 noise <- read_sf('data/noise_berlin_sample.geojson') %>%
@@ -271,9 +271,9 @@ plot_map(noise, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level = 15)
 Most cells cover 100m² and come along with the noise level at this spot (`L_N` column):
 
 ```{r}
-summary(noise)
+summary(noise[c('Shape_Area', 'L_N')])
 ```
-If we don't care for the specific noise levels and only want to form a single feature that represents noise levels with 50dB or more, we can apply `st_union()` on the whole dataset:
+If we don't care for the specific noise levels and only want to form a single feature that represents noise levels with 50dB or more, we can apply `st_union` on the whole dataset:
 
 ```{r}
 noise_union <- st_union(noise)
@@ -291,11 +291,10 @@ plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level
 plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
-Additionally applying `st_simplify()` removes the ragged edges:
+Additionally applying `st_simplify` removes the ragged edges:
 
 ```{r 22noise_union_simpl}
 noise_union_simpl <- st_simplify(noise_union, preserveTopology = FALSE, dTolerance = 50)
-
 plot_map(noise_union_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
@@ -305,7 +304,7 @@ Note how much the memory consumption was reduced from initially 42 *mega*bytes t
 round(c(object.size(noise), object.size(noise_union), object.size(noise_union_simpl)) / 1024)
 ```
 
-Applying simplify without union before would not have the desired effect since `st_simplify()` is performed per feature:
+Applying simplify without union before would not have the desired effect since `st_simplify` is performed per feature:
 
 
 ```{r 23noise_union_fail}
@@ -313,17 +312,18 @@ st_simplify(noise, preserveTopology = FALSE, dTolerance = 10) %>%
   plot_map(strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
-If we want to retain some of the noise level information, we can quantize ("bin") the noise level data into different ordered categories and apply the union operation per category. I'm used to the [dplyr](https://dplyr.tidyverse.org/) package, so I'll first create a quantized version of the noise variable `L_N` with three equally spaced levels between 50dB and 80dB and then use `group_by()` in conjunction with `group_modify()`:
+If we want to retain some of the noise level information, we can quantize ("bin") the noise level data into different ordered categories and apply the union operation per category. I'm used to the [dplyr](https://dplyr.tidyverse.org/) package, so I'll first create a quantized version of the noise variable `L_N` with three equally spaced levels between 50dB and 80dB and then use `group_by` in conjunction with `group_modify`:
 
 
 ```{r, warning=FALSE, message=FALSE}
 library(dplyr)
 
-noise_per_lvl <- mutate(noise,
-                        level = cut(L_N,
-                                    breaks = seq(50, 80, by = 10),
-                                    right = FALSE,
-                                    ordered_result = TRUE)) %>%
+noise_per_lvl <-
+  mutate(noise,
+         level = cut(L_N,
+                     breaks = seq(50, 80, by = 10),
+                     right = FALSE,
+                     ordered_result = TRUE)) %>%
   group_by(level) %>%
   group_modify(~ st_union(.x) %>% as_tibble()) %>%   # ".x" is refers to the current group
   ungroup() %>%
