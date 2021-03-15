@@ -3,10 +3,15 @@ title: "Simplifying geospatial features in R with sf and rmapshaper"
 author: "Markus Konrad"
 date: "3/15/2021"
 output: html_document
+self_contained: false
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  dev = 'png',
+  fig.path='figures/'
+)
 ```
 
 When working with geospatial data, memory consumption and computation time can become quite a problem for large datasets. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first to *simplify* the geospatial features (simply put, the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove whole features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss (well, this is the whole sense of simplification), you should be very careful about how much you simplify and if this in some way biases you results.
@@ -90,13 +95,13 @@ The dataset contains only a single feature (a multi-polygon, i.e. a set of polyg
 
 Let's plot our projection of MV. Note the axes which represent the distance from the projection center (I chose the geographic center of MV for that) in meters.
 
-```{r}
+```{r 01mvmap}
 plot_map(mv, graticules = TRUE)
 ```
 
 Let's zoom in on the island of Rügen with it's ragged coastline (west of it is the peninsula Darß).
 
-```{r}
+```{r 02mvmap_zoom}
 plot_map(mv, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
@@ -106,42 +111,44 @@ We can now continue to apply different simplification methods to the displayed f
 
 Let's apply `st_simplify` with a tolerance of 1km:
 
-```{r}
+```{r 03mvsimpl}
 mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 1000)
 plot_map(mv_simpl)
 ```
 
 We can see that the geometry is much simpler, especially when zooming in:
 
-```{r}
+```{r 04mvsimpl_zoom}
 plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
+
 We can also confirm the memory usage is much lower for the simplified feature (shown in kilobytes):
 
 ```{r}
 round(c(object.size(mv), object.size(mv_simpl)) / 1024)
 ```
+
 The purple areas show the differences between the original and the simplified version. We can see for example, that some smaller islands were completely removed.
 
-```{r}
+```{r 05mvsimpl_diff}
 plot_map(mv, mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
 When we set `preserveTopology` to TRUE, we can observe that the small islands are retained:
 
-```{r}
+```{r 06mvpreservetopo}
 mv_simpl <- st_simplify(mv, preserveTopology = TRUE, dTolerance = 1000)
 plot_map(mv_simpl, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
 Increasing the `dTolerance` parameter to 10km gives us something that is more akin to a Cubistic painting:
 
-```{r}
+```{r 07mvsimpl_coarse}
 mv_simpl <- st_simplify(mv, preserveTopology = FALSE, dTolerance = 10000)
 plot_map(mv_simpl)
 ```
 
-```{r}
+```{r 08mvsimpl_coarse_diff}
 plot_map(mv, mv_simpl)
 ```
 
@@ -157,28 +164,30 @@ fedstates[c('name', 'geometry')]
 
 This time, our spatial dataset contains 16 features which represent the boundaries of each federal state:
 
-```{r}
+```{r 09fedstates}
 plot_map(fedstates, graticules = TRUE, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
 Let's apply `st_simplify` with a tolerance of 10km and preserving feature topology:
 
-```{r}
+```{r 10fedstates_simpl_fail}
 fedstates_simpl <- st_simplify(fedstates, preserveTopology = TRUE, dTolerance = 10000)
 plot_map(fedstates_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
+
 Ups! We can see that `st_simplify` produced gaps and overlapping features, i.e. shared borders were not handled correctly! The problem is that `st_simplify` simply doesn't consider the topological concept of shared borders between features (like federal states in this case). When setting `preserveTopology = TRUE` it means that each feature's topology is preserve, but it doesn't mean that topology *between* features is considered.
 
 Luckily, there's the package [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html) that contains a function that does the trick. Before you install the package, please note that it requires a lot of (system-) dependencies to be installed.
 
 [Visvalingam's algorithm](https://en.wikipedia.org/wiki/Visvalingam%E2%80%93Whyatt_algorithm), which is used in this function, let's us specify the portion of vertices that should be kept after simplification. This can be specified with the `keep` parameter. The parameter `keep_shapes` controls whether whole features such as islands can be removed in the simplification process.
 
-```{r}
+```{r 11fedstates_simpl_rmapshaper}
 library(rmapshaper)
 
 fedstates_simpl2 <- ms_simplify(fedstates, keep = 0.001, keep_shapes = FALSE)
 plot_map(fedstates_simpl2, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
+
 As can be seen, `ms_simplify` respects the shared borders. The result is also much smaller in terms of memory usage:
 
 ```{r}
@@ -192,39 +201,39 @@ round(c(object.size(fedstates), object.size(fedstates_simpl2)) / 1024)
 Let's try a first example. Again, the buffer distance is in the same unit as our CRS, which is meters in our case, and we'll expand by 1km. When the buffer is generated, new vertices are added to form the expanded shape with round edges. The parameter `nQuadSegs` specifies how many segments are generated per quadrant and feature.
 
 
-```{r}
+```{r 12mvbuf}
 mv_buf <- st_buffer(mv, dist = 1000, nQuadSegs = 1)
 plot_map(mv_buf, graticules = TRUE)
 ```
 
-```{r}
+```{r 13mvbuf_diff}
 plot_map(mv, mv_buf, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
-As we can see, the memory usage is not so much reduced:
+The memory usage is not so much reduced:
 
 ```{r}
 round(c(object.size(mv), object.size(mv_buf)) / 1024)
 ```
 Now we shrink MV by 1km:
 
-```{r}
+```{r 14mvbuf2}
 mv_buf <- st_buffer(mv, -1000, nQuadSegs = 1)
 plot_map(mv_buf)
 ```
-```{r}
+```{r 15mvbuf2_diff}
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 
 We can also combine both buffering options, by first shrinking in order to remove small isolated features and then expanding again by the same distance so that the result has more or less the same extents as the original:
 
-```{r}
+```{r 16mvbuf3}
 mv_buf <- st_buffer(mv, -1000, nQuadSegs = 1) %>%
   st_buffer(1000, nQuadSegs = 1)
 plot_map(mv_buf)
 ```
 
-```{r}
+```{r 17mvbuf3_diff}
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
 Note how this is more aggressive than `st_simplify()` but the result uses more memory. We could now additionally apply `st_simplify()` to arrive at a very reduced feature.
@@ -240,7 +249,7 @@ When we apply `st_buffer()` to a dataset with multiple features like the federal
 
 The last function that we will look at is `st_union()`. It can be used to join overlapping and adjacent features. With this, we could for example join all features of the federal state boundaries in Germany and get a single feature that represents the national boundaries. But let's look at a more interesting example and load a new dataset. It contains a sample with regions with street noise of 50dB or more in Berlin at night.
 
-```{r}
+```{r 18noise}
 noise <- read_sf('data/noise_berlin_sample.geojson') %>%
   st_transform(crs = '+proj=aeqd +lat_0=52.51883 +lon_0=13.41537')
 
@@ -254,7 +263,7 @@ nrow(noise)
 ```
 Why is that so? When we zoom in and also plot each feature's boundary, we will notice that we actually have some sort of vectorized raster data! The noise regions are tiny raster cells:
 
-```{r}
+```{r 19noise_zoom}
 plot_map(noise, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level = 15)
 ```
 
@@ -265,7 +274,6 @@ summary(noise)
 ```
 If we don't care for the specific noise levels and only want to form a single feature that represents noise levels with 50dB or more, we can apply `st_union()` on the whole dataset:
 
-
 ```{r}
 noise_union <- st_union(noise)
 noise_union
@@ -273,18 +281,18 @@ noise_union
 
 As we can see in the output above, only a single feature is left (and all feature-specific "metadata" such as level of noise is gone!). We can confirm this visually:
 
-```{r}
+```{r 20noise_union_zoom}
 plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level = 15)
 ```
 
 
-```{r}
+```{r 21noise_union}
 plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
 Additionally applying `st_simplify()` removes the ragged edges:
 
-```{r}
+```{r 22noise_union_simpl}
 noise_union_simpl <- st_simplify(noise_union, preserveTopology = FALSE, dTolerance = 50)
 
 plot_map(noise_union_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
@@ -299,10 +307,11 @@ round(c(object.size(noise), object.size(noise_union), object.size(noise_union_si
 Applying simplify without union before would not have the desired effect since `st_simplify()` is performed per feature:
 
 
-```{r}
+```{r 23noise_union_fail}
 st_simplify(noise, preserveTopology = FALSE, dTolerance = 10) %>%
   plot_map(strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
+
 If we want to retain some of the noise level information, we can quantize ("bin") the noise level data into different ordered categories and apply the union operation per category. I'm used to the [dplyr](https://dplyr.tidyverse.org/) package, so I'll first create a quantized version of the noise variable `L_N` with three equally spaced levels between 50dB and 80dB and then use `group_by()` in conjunction with `group_modify()`:
 
 
@@ -324,7 +333,7 @@ round(c(object.size(noise), object.size(noise_per_lvl)) / 1024)
 ```
 The following gives us a plot with the three noise levels:
 
-```{r}
+```{r 24noise_levels}
 ggplot(noise_per_lvl) +
   geom_sf(aes(color = level, fill = level)) +
   coord_sf(datum = NA) +
@@ -333,4 +342,4 @@ ggplot(noise_per_lvl) +
 
 ## Conclusion
 
-All in all, it's wise to first think about simplifying your spatial data before you continue to work with the it. Spatial datasets are often very large and depending on your use-case you may not need a high level of detail. It may even be absolutely necessary to reduce the complexity of your data, e.g. when the computational capacities are limited or when you produce interactive maps for the web. As shown, R has all the tools that you need to simplify spatial data in the packages sf and rmapshaper.
+All in all, it's wise to first think about simplifying your spatial data before you continue to work with it. Spatial datasets are often very large and depending on your use-case you may not need a high level of detail. It may even be absolutely necessary to reduce the complexity of your data, e.g. when the computational capacities are limited or when you produce interactive maps for the web. As shown, R has all the tools that you need to simplify spatial data with the packages sf and rmapshaper.
