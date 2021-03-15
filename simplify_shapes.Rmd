@@ -1,7 +1,7 @@
 ---
 title: "Simplifying geospatial features in R with sf and rmapshaper"
 author: "Markus Konrad"
-date: "3/10/2021"
+date: "3/15/2021"
 output: html_document
 ---
 
@@ -236,55 +236,101 @@ round(c(object.size(mv), object.size(mv_buf)) / 1024)
 When we apply `st_buffer()` to a dataset with multiple features like the federal states dataset, the buffering will be applied to every feature (i.e. every state's boundary) separately. This will result in either overlapping features (extending) or gaps between them (shrinking).
 
 
-## `st_union()`
+## Joining overlapping and adjacent features with `st_union()`
 
-joins overlapping or touching shapes
+The last function that we will look at is `st_union()`. It can be used to join overlapping and adjacent features. With this, we could for example join all features of the federal state boundaries in Germany and get a single feature that represents the national boundaries. But let's look at a more interesting example and load a new dataset. It contains a sample with regions with street noise of 50dB or more in Berlin at night.
 
 ```{r}
 noise <- read_sf('data/noise_berlin_sample.geojson') %>%
   st_transform(crs = '+proj=aeqd +lat_0=52.51883 +lon_0=13.41537')
 
-plot_map(noise)
+plot_map(noise, graticules = TRUE)
 ```
+
+You may notice the ragged edges in the picture above. Furthermore, the dataset is quite large and contains a lot of rows (i.e. features):
 
 ```{r}
 nrow(noise)
 ```
-
+Why is that so? When we zoom in and also plot each feature's boundary, we will notice that we actually have some sort of vectorized raster data! The noise regions are tiny raster cells:
 
 ```{r}
-plot_map(noise, strokecolor = 'black', fillcolor = 'gray', zoom_level = 15)
+plot_map(noise, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level = 15)
 ```
 
-we also lose information with this operation
+Most cells cover 100m² and come along with the noise level at this spot (`L_N` column):
+
+```{r}
+summary(noise)
+```
+If we don't care for the specific noise levels and only want to form a single feature that represents noise levels with 50dB or more, we can apply `st_union()` on the whole dataset:
+
 
 ```{r}
 noise_union <- st_union(noise)
 noise_union
 ```
 
+As we can see in the output above, only a single feature is left (and all feature-specific "metadata" such as level of noise is gone!). We can confirm this visually:
+
 ```{r}
-plot_map(noise_union, strokecolor = 'black', fillcolor = 'gray', zoom_level = 15)
+plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4', zoom_level = 15)
 ```
 
 
 ```{r}
-plot_map(noise_union, strokecolor = 'black', fillcolor = 'gray')
+plot_map(noise_union, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
+Additionally applying `st_simplify()` removes the ragged edges:
 
 ```{r}
-noise_union_simpl <- st_simplify(noise_union, preserveTopology = FALSE, dTolerance = 10)
+noise_union_simpl <- st_simplify(noise_union, preserveTopology = FALSE, dTolerance = 50)
 
-plot_map(noise_union_simpl, strokecolor = 'black', fillcolor = 'gray')
+plot_map(noise_union_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
+Note how much the memory consumption was reduced from initially 42 *mega*bytes to 282 *kilo*bytes or even 18 kilobytes when further simplified:
 
-applying simplify without union before would not have the desired effect
+```{r}
+round(c(object.size(noise), object.size(noise_union), object.size(noise_union_simpl)) / 1024)
+```
+
+Applying simplify without union before would not have the desired effect since `st_simplify()` is performed per feature:
 
 
 ```{r}
 st_simplify(noise, preserveTopology = FALSE, dTolerance = 10) %>%
-  plot_map(strokecolor = 'black', fillcolor = 'gray')
+  plot_map(strokecolor = '#097FB3', fillcolor = '#AED3E4')
+```
+If we want to retain some of the noise level information, we can quantize ("bin") the noise level data into different ordered categories and apply the union operation per category. I'm used to the [dplyr](https://dplyr.tidyverse.org/) package, so I'll first create a quantized version of the noise variable `L_N` with three equally spaced levels between 50dB and 80dB and then use `group_by()` in conjunction with `group_modify()`:
+
+
+```{r, warning=FALSE}
+library(dplyr)
+
+noise_per_lvl <- mutate(noise, level = cut(L_N, breaks = seq(50, 80, by = 10), right = FALSE, ordered_result = TRUE)) %>%
+  group_by(level) %>%
+  group_modify(~ st_union(.x) %>% as_tibble()) %>%   # ".x" is refers to the current group
+  ungroup() %>%
+  st_as_sf()      # convert back to "sf" object since this information is lost during group_by()
+noise_per_lvl
 ```
 
+Again, the result is much smaller in terms of memory:
+
+```{r}
+round(c(object.size(noise), object.size(noise_per_lvl)) / 1024)
+```
+The following gives us a plot with the three noise levels:
+
+```{r}
+ggplot(noise_per_lvl) +
+  geom_sf(aes(color = level, fill = level)) +
+  coord_sf(datum = NA) +
+  theme_bw()
+```
+
+## Conclusion
+
+All in all, it's wise to first think about simplifying your spatial data before you continue to work with the it. Spatial datasets are often very large and depending on your use-case you may not need a high level of detail. It may even be absolutely necessary to reduce the complexity of your data, e.g. when the computational capacities are limited or when you produce interactive maps for the web. As shown, R has all the tools that you need to simplify spatial data in the packages sf and rmapshaper.
