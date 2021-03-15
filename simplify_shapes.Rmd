@@ -14,9 +14,9 @@ knitr::opts_chunk$set(
 )
 ```
 
-When working with geospatial data, memory consumption and computation time can become quite a problem for large datasets. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first to *simplify* the geospatial features (simply put, the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove whole features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss (well, this is the whole sense of simplification), you should be very careful about how much you simplify and if this in some way biases you results.
+When working with geospatial data, memory consumption and computation time can become quite a problem, since these datasets are often very large. You may have very granular, high resolution data although that isn't really necessary for your use-case, for example when plotting large scale maps or when applying calculations at a spatial level for which lower granularity is sufficient. In such scenarios, it's best to first to *simplify* the *geospatial features* (simply put, the sets of points, lines and polygons that represent geographic entities) in your data. By simplify I mean that we generally reduce the amount of information that is used to represent these features, i.e. we remove complete features (e.g. small islands), we join features (e.g. we combine several overlapping or adjacent features) or we reduce the complexity of features (e.g. we remove vertices or holes in a feature). Since applying these operations comes with information loss (well, this is the whole sense of simplification), you should be very careful about how much you simplify and if this in some way biases you results.
 
-In R, we can apply this sort of simplification with a few functions from packages [sf](https://cran.r-project.org/web/packages/sf/index.html) and, for some special cases explained below, [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html). In the following, I will show how to apply them and what the effects of their parameters are.
+In R, we can apply this sort of simplification with a few functions from the packages [sf](https://cran.r-project.org/web/packages/sf/index.html) and, for some special cases explained below, [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html). In the following, I will show how to apply them and what the effects of their parameters are.
 
 First, let's load the required libraries. Besides the already mentioned sf package, we also load [ggplot2](https://ggplot2.tidyverse.org/) for visualization and [magrittr](https://magrittr.tidyverse.org/), because I will use the `%>%` pipe operator sometimes.
 
@@ -26,7 +26,7 @@ library(magrittr)
 library(sf)
 ```
 
-I will also use a utility function `plot_map()` which is capable of plotting geospatial features, zooming into certain spots and highlighting differences between two features. The lengthy source code for this function is available in the Rmarkdown document (TODO: link to Rmd doc.)
+I will also use a utility function `plot_map()` which is capable of plotting geospatial features, zooming into certain spots and highlighting differences between two features. The lengthy source code for this function is available in the [Rmarkdown document of the related GitHub repository](https://github.com/WZBSocialScienceCenter/r_simplify_features).
 
 ```{r, echo=FALSE}
 plot_map <- function(data, diff_to = NULL, strokecolor = NA, fillcolor = c('#097FB3', '#A13675'),
@@ -91,7 +91,7 @@ mv <- st_read('data/mv.geojson') %>%
   st_transform(crs = '+proj=aeqd +lat_0=53.6 +lon_0=12.7')  # centered at input data for low distortion
 ```
 
-The dataset contains only a single feature (a multi-polygon, i.e. a set of polygons) with some metadata from OpenStreetMap. I use `st_geometry()` to access this feature (i.e. dismiss the metadata) and `st_transform()` to transform it to an [Azimuthal Equidistant](http://www.radicalcartography.net/?projectionref) map projection. The latter is quite important. Most functions that we'll use don't work with spherical coordinates as used for example by the [WGS84 (GPS) standard](http://epsg.io/4326), where longitude and latitude in degrees describe a position on a sphere. We need to project these coordinates on a plane using a coordinate reference system (CRS). All projections distort in some way, but we can chose a CRS that accurately represents certain measures. For example, I chose an equidistant CRS because it accurately represents distances up to 10,000 km from the center of projection. Another important aspect is that by using such a CRS, we move from degrees to meters as units for our coordinates.
+The dataset contains only a single feature (a multi-polygon, i.e. a set of polygons) with some metadata from OpenStreetMap. I use `st_geometry()` to access this feature (i.e. dismiss the metadata) and `st_transform()` to transform it to an [Azimuthal Equidistant](http://www.radicalcartography.net/?projectionref) map projection. The latter is quite important. Most functions that I'll use don't work with spherical coordinates as used for example by the [WGS84 (GPS) standard](http://epsg.io/4326), where longitude and latitude in degrees describe a position on a sphere. We need to project these coordinates on a plane using a coordinate reference system (CRS) with a specific projection. All projections distort in some way, but we can chose a CRS that accurately represents certain measures. For example, I choose an equidistant CRS because it accurately represents distances up to 10,000 km from the center of projection. Another important aspect is that by using this CRS, we move from degrees to meters as units for our coordinates.
 
 Let's plot our projection of MV. Note the axes which represent the distance from the projection center (I chose the geographic center of MV for that) in meters.
 
@@ -99,7 +99,7 @@ Let's plot our projection of MV. Note the axes which represent the distance from
 plot_map(mv, graticules = TRUE)
 ```
 
-Let's zoom in on the island of Rügen with it's ragged coastline (west of it is the peninsula Darß).
+Let's zoom in on the island of Rügen with it's ragged coastline (west of it is the peninsula Darß, east is a part of Usedom).
 
 ```{r 02mvmap_zoom}
 plot_map(mv, graticules = TRUE, zoom_to = c(13.359, 54.413), zoom_level = 8)
@@ -175,11 +175,11 @@ fedstates_simpl <- st_simplify(fedstates, preserveTopology = TRUE, dTolerance = 
 plot_map(fedstates_simpl, strokecolor = '#097FB3', fillcolor = '#AED3E4')
 ```
 
-Ups! We can see that `st_simplify` produced gaps and overlapping features, i.e. shared borders were not handled correctly! The problem is that `st_simplify` simply doesn't consider the topological concept of shared borders between features (like federal states in this case). When setting `preserveTopology = TRUE` it means that each feature's topology is preserve, but it doesn't mean that topology *between* features is considered.
+Ups! We can see that `st_simplify` produced gaps and overlapping features, i.e. shared borders were not handled correctly! The problem is that `st_simplify` simply doesn't consider the topological concept of shared borders between features (like federal states in this case). When setting `preserveTopology = TRUE` it means that each feature's topology is preserved, but it doesn't mean that the topology *between* features is considered.
 
 Luckily, there's the package [rmapshaper](https://cran.r-project.org/web/packages/rmapshaper/index.html) that contains a function that does the trick. Before you install the package, please note that it requires a lot of (system-) dependencies to be installed.
 
-[Visvalingam's algorithm](https://en.wikipedia.org/wiki/Visvalingam%E2%80%93Whyatt_algorithm), which is used in this function, let's us specify the portion of vertices that should be kept after simplification. This can be specified with the `keep` parameter. The parameter `keep_shapes` controls whether whole features such as islands can be removed in the simplification process.
+[Visvalingam's algorithm](https://en.wikipedia.org/wiki/Visvalingam%E2%80%93Whyatt_algorithm), which is used in this function, let's us specify the portion of vertices that should be kept after simplification. This can be specified with the `keep` parameter. The parameter `keep_shapes` controls whether complete features such as islands can be removed in the simplification process.
 
 ```{r 11fedstates_simpl_rmapshaper}
 library(rmapshaper)
@@ -236,6 +236,7 @@ plot_map(mv_buf)
 ```{r 17mvbuf3_diff}
 plot_map(mv, mv_buf, zoom_to = c(13.359, 54.413), zoom_level = 8)
 ```
+
 Note how this is more aggressive than `st_simplify()` but the result uses more memory. We could now additionally apply `st_simplify()` to arrive at a very reduced feature.
 
 ```{r}
@@ -315,10 +316,14 @@ st_simplify(noise, preserveTopology = FALSE, dTolerance = 10) %>%
 If we want to retain some of the noise level information, we can quantize ("bin") the noise level data into different ordered categories and apply the union operation per category. I'm used to the [dplyr](https://dplyr.tidyverse.org/) package, so I'll first create a quantized version of the noise variable `L_N` with three equally spaced levels between 50dB and 80dB and then use `group_by()` in conjunction with `group_modify()`:
 
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 library(dplyr)
 
-noise_per_lvl <- mutate(noise, level = cut(L_N, breaks = seq(50, 80, by = 10), right = FALSE, ordered_result = TRUE)) %>%
+noise_per_lvl <- mutate(noise,
+                        level = cut(L_N,
+                                    breaks = seq(50, 80, by = 10),
+                                    right = FALSE,
+                                    ordered_result = TRUE)) %>%
   group_by(level) %>%
   group_modify(~ st_union(.x) %>% as_tibble()) %>%   # ".x" is refers to the current group
   ungroup() %>%
